@@ -174,7 +174,7 @@ func (fs *fsstats) StartEventsTotal() {
 	}
 }
 func (fs *fsstats) StartBridgedCallsCount() {
-	fs.fs_registration_count = promauto.NewGauge(prometheus.GaugeOpts{
+	fs.fs_calls_count = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "freeswitch_calls_count",
 		Help: "The number of bridged calls, as reported by freeswitch",
 	})
