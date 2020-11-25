@@ -254,16 +254,22 @@ func (fs *fsstats) getChannelsTotal() {
 func (fs *fsstats) getRegistrationsCount() {
 	for {
 		if fs.fscon != nil {
-			ev, err := fs.syncSend("API show registrations")
+			ev, err := fs.syncSend("API show registrations count")
 			if err != nil {
 				fs.log.Warn("error sending show registrations {}", err)
 			} else {
-				q := strings.Split(strings.TrimSpace(ev.Body), " ")
-				v, err := strconv.ParseFloat(q[0], 64)
-				if err != nil {
-					fs.log.Warn("error parsing channel current:\n{}\nerror: {}", ev.String(), err)
-				} else {
-					fs.fs_registration_count.Set(v)
+				status_s := strings.Split(ev.Body, "\n")
+				for _, sl := range status_s {
+					if strings.HasSuffix(sl, "total.") {
+						tmp := strings.Split(sl, " ")
+						v, err := strconv.ParseFloat(tmp[0], 64)
+						if err != nil {
+							fs.log.Warn("error parsing channels:\n{}\nerror: {}", sl, err)
+							break
+						}
+						fs.syncMap.Store("total_channels", v)
+						break
+					}
 				}
 			}
 		}
