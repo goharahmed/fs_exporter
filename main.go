@@ -63,6 +63,9 @@ func main() {
 			if !config.GetBool("disable-registrations-count") {
 				stats.StartRegistrationCount()
 			}
+			if !config.GetBool("disable-calls-count") {
+				stats.StartBridgedCallsCount()
+			}
 			if config.GetBool("enable-events-total") {
 				stats.StartEventsTotal()
 			}
@@ -89,16 +92,19 @@ func main() {
 	cmd.PersistentFlags().String("loglevel", "info", "level to show logs at (warn, info, debug, trace)")
 	config.BindPFlag("loglevel", cmd.PersistentFlags().Lookup("loglevel"))
 
-	cmd.PersistentFlags().Bool("disable-channels-total", false, "Enabled freeswitch_channels_total stats")
+	cmd.PersistentFlags().Bool("disable-channels-total", false, "Disable collecting freeswitch_channels_total stats, default: enabled")
 	config.BindPFlag("disable-channels-total", cmd.PersistentFlags().Lookup("disable-channels-total"))
 
-	cmd.PersistentFlags().Bool("disable-channels-current", false, "Enabled freeswitch_channels_current stats")
+	cmd.PersistentFlags().Bool("disable-channels-current", false, "Disable collecting freeswitch_channels_current stats, default: enabled")
 	config.BindPFlag("disable-channels-current", cmd.PersistentFlags().Lookup("disable-channels-current"))
 
-	cmd.PersistentFlags().Bool("disable-registrations-count", false, "Enabled freeswitch_registrations_count stats")
+	cmd.PersistentFlags().Bool("disable-registrations-count", false, "Disable collecting freeswitch_registrations_count stats, default: enabled")
 	config.BindPFlag("disable-registrations-count", cmd.PersistentFlags().Lookup("disable-registrations-count"))
 
-	cmd.PersistentFlags().Bool("enable-events-total", false, "Enables counting of all freeswitch events freeswitch_events_total stats")
+	cmd.PersistentFlags().Bool("disable-calls-count", false, "Disable collecting freeswitch_calls_count stats, default: enabled")
+	config.BindPFlag("disable-callscount", cmd.PersistentFlags().Lookup("disable-calls-count"))
+
+	cmd.PersistentFlags().Bool("enable-events-total", false, "Enable counting of all freeswitch events freeswitch_events_total stats, default: disabled")
 	config.BindPFlag("enable-events-total", cmd.PersistentFlags().Lookup("enable-events-total"))
 
 	cmd.PersistentFlags().Bool("version", false, "prints the version the exits")
@@ -129,6 +135,7 @@ type fsstats struct {
 	fs_channels_total     prometheus.CounterFunc
 	fs_channels_current   prometheus.Gauge
 	fs_registration_count prometheus.Gauge
+	fs_calls_count        prometheus.Gauge
 	fs_latency            prometheus.Histogram
 	fs_alive              prometheus.Gauge
 	fs_events_total       *prometheus.CounterVec
@@ -165,6 +172,13 @@ func (fs *fsstats) StartEventsTotal() {
 	if fs.fscon != nil {
 		fs.syncSend("events json ALL")
 	}
+}
+func (fs *fsstats) StartBridgedCallsCount() {
+	fs.fs_registration_count = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "freeswitch_calls_count",
+		Help: "The number of bridged calls, as reported by freeswitch",
+	})
+	go fs.getBridgedCallsCount()
 }
 func (fs *fsstats) StartRegistrationCount() {
 	fs.fs_registration_count = promauto.NewGauge(prometheus.GaugeOpts{
@@ -251,6 +265,31 @@ func (fs *fsstats) getChannelsTotal() {
 		time.Sleep(5 * time.Second)
 	}
 }
+func (fs *fsstats) getBridgedCallsCount() {
+	for {
+		if fs.fscon != nil {
+			ev, err := fs.syncSend("API show calls count")
+			if err != nil {
+				fs.log.Warn("error sending show calls count {}", err)
+			} else {
+				status_s := strings.Split(ev.Body, "\n")
+				for _, sl := range status_s {
+					if strings.HasSuffix(sl, "total.") {
+						tmp := strings.Split(sl, " ")
+						v, err := strconv.ParseFloat(tmp[0], 64)
+						if err != nil {
+							fs.log.Warn("error parsing calls count:\n{}\nerror: {}", sl, err)
+							fs.fs_calls_count.Set(-1)
+						} else {
+							fs.fs_calls_count.Set(v)
+						}
+					}
+				}
+			}
+		}
+		time.Sleep(5 * time.Second)
+	}
+}
 func (fs *fsstats) getRegistrationsCount() {
 	for {
 		if fs.fscon != nil {
@@ -264,11 +303,10 @@ func (fs *fsstats) getRegistrationsCount() {
 						tmp := strings.Split(sl, " ")
 						v, err := strconv.ParseFloat(tmp[0], 64)
 						if err != nil {
-							fs.log.Warn("error parsing channels:\n{}\nerror: {}", sl, err)
-							break
+							fs.log.Warn("error parsing registration count:\n{}\nerror: {}", sl, err)
+						} else {
+							fs.fs_registration_count.Set(v)
 						}
-						fs.syncMap.Store("total_channels", v)
-						break
 					}
 				}
 			}

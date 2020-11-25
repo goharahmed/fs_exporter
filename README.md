@@ -21,9 +21,11 @@ Other options are:
 
 Options for metrics are:
 
-* disable-channels-total - disable polling the current freeswitch total channels.
-* disable-channels-current - disable polling the current number of channels from freeswitch.
-* enable-events-total - enable watching all events from freeswitch.  This defaults to disabled since it can cause higher load on certain boxes, enable it if useful.
+* disable-channels-total - disable polling the current freeswitch total channels. Default: enabled
+* disable-channels-current - disable polling the current number of channels from freeswitch. Default: enabled
+* enable-events-total - enable watching all events from freeswitch.  This defaults to disabled since it can cause higher load on certain boxes, enable it if useful. Default: disabled
+* disable-registrations-count - disable polling the current freeswitch total registrations count. Default: enabled
+* disable-calls-count - disable polling the current freeswitch total brodged calls count. Default: enabled
 
 [Build-Status-Url]: https://travis-ci.org/PremiereGlobal/fs_exporter
 [Build-Status-Image]: https://travis-ci.org/PremiereGlobal/fs_exporter.svg?branch=master
