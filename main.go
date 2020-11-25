@@ -20,7 +20,8 @@ import (
 	"github.com/spf13/viper"
 )
 
-var version string
+//var version string
+const version = "0.05"
 
 func main() {
 	slog := stimlog.GetLogger()
@@ -28,10 +29,6 @@ func main() {
 	config.SetEnvPrefix("fse")
 	config.AutomaticEnv()
 	config.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
-
-	if version == "" || version == "lastest" {
-		version = "unknown"
-	}
 
 	var cmd = &cobra.Command{
 		Use:   "fs_exporter",
@@ -62,6 +59,9 @@ func main() {
 			}
 			if !config.GetBool("disable-channels-current") {
 				stats.StartChannelsCurrent()
+			}
+			if !config.GetBool("disable-registrations-count") {
+				stats.StartRegistrationCount()
 			}
 			if config.GetBool("enable-events-total") {
 				stats.StartEventsTotal()
@@ -95,6 +95,9 @@ func main() {
 	cmd.PersistentFlags().Bool("disable-channels-current", false, "Enabled freeswitch_channels_current stats")
 	config.BindPFlag("disable-channels-current", cmd.PersistentFlags().Lookup("disable-channels-current"))
 
+	cmd.PersistentFlags().Bool("disable-registrations-count", false, "Enabled freeswitch_registrations_count stats")
+	config.BindPFlag("disable-registrations-count", cmd.PersistentFlags().Lookup("disable-registrations-count"))
+
 	cmd.PersistentFlags().Bool("enable-events-total", false, "Enables counting of all freeswitch events freeswitch_events_total stats")
 	config.BindPFlag("enable-events-total", cmd.PersistentFlags().Lookup("enable-events-total"))
 
@@ -123,11 +126,12 @@ type fsstats struct {
 
 	fs_init_commands sets.Set
 
-	fs_channels_total   prometheus.CounterFunc
-	fs_channels_current prometheus.Gauge
-	fs_latency          prometheus.Histogram
-	fs_alive            prometheus.Gauge
-	fs_events_total     *prometheus.CounterVec
+	fs_channels_total     prometheus.CounterFunc
+	fs_channels_current   prometheus.Gauge
+	fs_registration_count prometheus.Gauge
+	fs_latency            prometheus.Histogram
+	fs_alive              prometheus.Gauge
+	fs_events_total       *prometheus.CounterVec
 }
 
 func NewStats(slog stimlog.StimLogger, ll stimlog.Level, host string, port string, password string) *fsstats {
@@ -162,7 +166,13 @@ func (fs *fsstats) StartEventsTotal() {
 		fs.syncSend("events json ALL")
 	}
 }
-
+func (fs *fsstats) StartRegistrationCount() {
+	fs.fs_registration_count = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "freeswitch_registrations_count",
+		Help: "The number of current registrations, as reported by freeswitch",
+	})
+	go fs.getRegistrationsCount()
+}
 func (fs *fsstats) StartChannelsCurrent() {
 	fs.fs_channels_current = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "freeswitch_channels_current",
@@ -241,7 +251,25 @@ func (fs *fsstats) getChannelsTotal() {
 		time.Sleep(5 * time.Second)
 	}
 }
-
+func (fs *fsstats) getRegistrationsCount() {
+	for {
+		if fs.fscon != nil {
+			ev, err := fs.syncSend("API show registrations")
+			if err != nil {
+				fs.log.Warn("error sending show registrations {}", err)
+			} else {
+				q := strings.Split(strings.TrimSpace(ev.Body), " ")
+				v, err := strconv.ParseFloat(q[0], 64)
+				if err != nil {
+					fs.log.Warn("error parsing channel current:\n{}\nerror: {}", ev.String(), err)
+				} else {
+					fs.fs_registration_count.Set(v)
+				}
+			}
+		}
+		time.Sleep(5 * time.Second)
+	}
+}
 func (fs *fsstats) getChannelsCurrent() {
 	for {
 		if fs.fscon != nil {
